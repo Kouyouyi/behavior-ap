@@ -96,6 +96,63 @@ class EvidenceFinalizationTests(unittest.TestCase):
                 backend._step([0.0] * 23, source="semantic_command")
             self.assertEqual(backend.steps, 0)
 
+    def test_loaded_scene_identity_checked_without_actions_and_persisted(self):
+        with tempfile.TemporaryDirectory() as output:
+            config = resolve_registered("assembling_gift_baskets", "original", split="train", instance_id=42)
+            backend = SimulationBackend({**config, "output_dir": output})
+            backend.state = SimpleNamespace(instance_id=42, env_accessor=SimpleNamespace(
+                scene=SimpleNamespace(scene_model=config["scene_model"])))
+            backend.evaluator = SimpleNamespace(env=SimpleNamespace(task=SimpleNamespace(
+                activity_name=config["task_name"], activity_definition_id=config["activity_definition_id"])))
+            backend._validate_loaded_scene(config)
+            record = json.loads((Path(output) / "scene_identity_validation.json").read_text())
+            self.assertTrue(record["verified"])
+            self.assertEqual(record["expected"], record["actual"])
+            self.assertEqual(record["split"], "train")
+            self.assertEqual(backend.steps, 0)
+            self.assertFalse(backend.started)
+
+    def test_loaded_scene_identity_drift_is_rejected_and_recorded(self):
+        for key, value in (("scene_model", "wrong_house"), ("activity_name", "wrong_activity"),
+                           ("activity_definition_id", 1), ("activity_definition_id", False),
+                           ("instance_id", 302)):
+            with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as output:
+                config = resolve_registered("radio", "ood")
+                backend = SimulationBackend({**config, "output_dir": output})
+                scene = SimpleNamespace(scene_model=config["scene_model"])
+                task = SimpleNamespace(activity_name=config["task_name"],
+                                       activity_definition_id=config["activity_definition_id"])
+                backend.state = SimpleNamespace(instance_id=config["instance_id"],
+                                                env_accessor=SimpleNamespace(scene=scene))
+                backend.evaluator = SimpleNamespace(env=SimpleNamespace(task=task))
+                target = scene if key == "scene_model" else backend.state if key == "instance_id" else task
+                setattr(target, key, value)
+                with self.assertRaisesRegex(ValueError, "Loaded official scene identity"):
+                    backend._validate_loaded_scene(config)
+                record = json.loads((Path(output) / "scene_identity_validation.json").read_text())
+                self.assertFalse(record["verified"])
+                self.assertEqual(record["mismatches"], [key])
+                self.assertFalse(backend.started)
+                self.assertEqual(backend.steps, 0)
+
+    def test_generic_low_level_start_rejects_unregistered_original_overrides(self):
+        overrides = (
+            {"task_name": "not_an_official_task"}, {"instance_id": 99999},
+            {"target_key": "invented_target"}, {"ood": "invented_ood"},
+            {"mode": "hidden_test"}, {"initial_offset_x": 1.0},
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "unstarted"
+                config = {**resolve_registered("assembling_gift_baskets", "original"),
+                          "output_dir": output, **override}
+                backend = SimulationBackend(config)
+                with self.assertRaises(ValueError):
+                    backend.start()
+                self.assertFalse(output.exists())
+                self.assertIsNone(backend.evaluator)
+                self.assertFalse(backend.started)
+
     def test_low_level_start_cannot_bypass_registered_scene_or_runtime(self):
         overrides = (
             {"instance_id": 302}, {"target_key": "other_target"},

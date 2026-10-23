@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from behavior_ap_sim.environment import RadioEnvironment
+from behavior_ap_sim.environment import BehaviorEnvironment, RadioEnvironment
 
 
 class Body:
@@ -42,7 +42,8 @@ class Backend:
             'base': range(3), 'trunk': range(3, 7), 'arm_left': range(7, 14), 'gripper_left': [14],
             'arm_right': range(15, 22), 'gripper_right': [22]}.items()}
         self.state = SimpleNamespace(obs={'robot_r1::proprio': np.zeros(61)}, env_accessor=SimpleNamespace(
-            object_scope={config['target_key']: self.target}, scene=SimpleNamespace(objects=[self.robot, self.target])))
+            object_scope=({config['target_key']: self.target} if config.get('target_key') is not None else {}),
+            scene=SimpleNamespace(objects=[self.robot, self.target])))
         self.og = SimpleNamespace(sim=SimpleNamespace(get_sim_step_dt=lambda: 1 / 30, step=Mock()))
         self.Rotation = Rotation
         self.th = SimpleNamespace(as_tensor=lambda value, **kwargs: np.array(value), float32=np.float32)
@@ -91,6 +92,52 @@ class EnvironmentTests(unittest.TestCase):
         self.assertLess(evidence['orientation_error_rad'], 1e-8)
         with self.assertRaisesRegex(RuntimeError, 'restart'):
             ood.start()
+
+    def test_generic_original_uses_official_split_and_no_single_target(self):
+        env = BehaviorEnvironment(self.path / 'generic', task='assembling_gift_baskets').start()
+        self.assertEqual(env.backend.task_name, 'assembling_gift_baskets')
+        self.assertEqual(env.backend.config['ood'], 'none')
+        self.assertEqual(env.backend.config['initial_yaw_offset_deg'], 0)
+        self.assertIsNone(env.target)
+        env.backend.og.sim.step.assert_not_called()
+        observation = env.capture(self.path / 'generic_capture')
+        self.assertEqual(len(observation['state']), 61)
+        private = json.loads((self.path / 'generic_capture/scorer_private.json').read_text())
+        self.assertIsNone(private['target_position'])
+        self.assertIs(private['official_task_success'], False)
+        self.assertTrue(env.step(np.zeros(23)))
+        self.assertEqual(env.steps, 1)
+
+    def test_generic_preserves_requested_official_split_and_instance(self):
+        env = BehaviorEnvironment(self.path / 'train', task=26, variant='id', split='train', instance_id=42).start()
+        self.assertEqual(env.variant, 'original')
+        self.assertEqual(env.backend.instance_id, 42)
+        self.assertEqual(env.backend.config['split'], 'train')
+        self.assertEqual(env.backend.config['mode'], 'train')
+        self.assertIs(env.backend.config['partial_scene_load'], True)
+        self.assertIsNone(env.target)
+        self.assertEqual(env.steps, 0)
+        env.backend.og.sim.step.assert_not_called()
+
+    def test_generic_visibility_and_approach_require_registered_target(self):
+        with self.assertRaisesRegex(ValueError, 'registered single target'):
+            BehaviorEnvironment(self.path / 'generic', task='assembling_gift_baskets', initial_visibility_audit=True)
+        self.assertFalse((self.path / 'generic').exists())
+        env = BehaviorEnvironment(self.path / 'generic', task='assembling_gift_baskets').start()
+        with self.assertRaisesRegex(ValueError, 'registered single target'):
+            env.verify_approach(self.path / 'generic_audit')
+        self.assertFalse((self.path / 'generic_audit').exists())
+        self.assertFalse(env._terminal_audit_started)
+        self.assertTrue(env.step(np.zeros(23)))
+
+    def test_generic_registration_rejects_new_ood_and_radio_alias_is_fixed(self):
+        with self.assertRaises(ValueError):
+            BehaviorEnvironment(self.path / 'generic', task='assembling_gift_baskets', variant='ood')
+        with self.assertRaises(TypeError):
+            RadioEnvironment(self.path / 'bad_alias', task='assembling_gift_baskets')
+        generic_radio = BehaviorEnvironment(self.path / 'radio', task='radio', variant='ood').start()
+        self.assertEqual(generic_radio.backend.config['ood'], 'radio_on_tv_cabinet_facing_room')
+        self.assertEqual(generic_radio.backend.og.sim.step.call_count, 30)
 
     def test_constructor_rejects_nonregistered_variants_and_invalid_budget(self):
         for kwargs in ({'variant': 'cabinet'}, {'max_steps': 0}, {'max_steps': True},

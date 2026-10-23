@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from behavior_ap_sim.environment import RadioEnvironment
+from behavior_ap_sim.environment import BehaviorEnvironment, RadioEnvironment
 from behavior_ap_sim.state import fingerprint, match_fingerprint, read_serialized_state
 from test_environment import Backend
 
@@ -29,6 +29,44 @@ class StateTests(unittest.TestCase):
 
     def export(self):
         return self.env.save_handoff(self.path / 'handoff')
+
+    def test_generic_no_target_handoff_still_checks_full_state_and_object_order(self):
+        self.env = BehaviorEnvironment(self.path / 'generic', task='assembling_gift_baskets').start()
+        self.env.backend.og.sim.dump_state = Mock(return_value=self.state)
+        self.env.backend.og.sim.load_state = Mock()
+        self.env.backend.og.sim.device = 'cpu'
+        metadata = self.export()
+        self.assertEqual(metadata['fingerprint']['objects'], {})
+        self.assertEqual(metadata['objects'], ['robot_r1', 'radio'])
+        with patch('behavior_ap_sim.state._restore_derived_caches'):
+            restored = self.env.restore_handoff(self.path / 'handoff')
+        self.assertTrue(restored['full_state_checked'])
+        self.assertEqual(restored['physics_steps_added'], 0)
+        self.env.backend.og.sim.load_state.assert_called_once()
+        self.env.backend.og.sim.step.assert_not_called()
+
+    def test_generic_extra_target_fingerprint_rejected_before_world_load(self):
+        self.env = BehaviorEnvironment(self.path / 'generic', task='assembling_gift_baskets').start()
+        self.env.backend.og.sim.dump_state = Mock(return_value=self.state)
+        self.env.backend.og.sim.load_state = Mock()
+        metadata = self.export()
+        metadata['fingerprint']['objects']['invented_target'] = [[0, 0, 1], [0, 0, 0, 1]]
+        (self.path / 'handoff/metadata.json').write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(ValueError, 'fingerprint identity'):
+            self.env.restore_handoff(self.path / 'handoff')
+        self.env.backend.og.sim.load_state.assert_not_called()
+
+    def test_generic_fingerprint_must_explicitly_record_an_object_mapping(self):
+        self.env = BehaviorEnvironment(self.path / 'generic', task='assembling_gift_baskets').start()
+        self.env.backend.og.sim.dump_state = Mock(return_value=self.state)
+        self.env.backend.og.sim.load_state = Mock()
+        metadata = self.export()
+        for invalid_objects in (None, [], ''):
+            metadata['fingerprint']['objects'] = invalid_objects
+            (self.path / 'handoff/metadata.json').write_text(json.dumps(metadata))
+            with self.subTest(objects=invalid_objects), self.assertRaisesRegex(ValueError, 'fingerprint identity'):
+                self.env.restore_handoff(self.path / 'handoff')
+        self.env.backend.og.sim.load_state.assert_not_called()
 
     def test_fingerprint_rejects_identity_pose_and_nonfinite_drift(self):
         expected = fingerprint(self.env)

@@ -11,9 +11,12 @@ from behavior_ap_sim.registry import (catalog, registered_scene_identity, regist
 
 
 class RegistryTests(unittest.TestCase):
-    def test_catalog_contains_only_tuned_radio_variants(self):
-        self.assertEqual(catalog(), [{'task_index': 0, 'task_name': 'turning_on_radio',
-                                      'variants': ['original', 'ood']}])
+    def test_catalog_contains_all_official_id_and_only_approved_ood(self):
+        rows = catalog()
+        self.assertEqual(len(rows), 100)
+        self.assertEqual([row['task_index'] for row in rows], list(range(100)))
+        self.assertEqual([row['task_name'] for row in rows if 'ood' in row['variants']], ['turning_on_radio'])
+        self.assertTrue(all('original' in row['variants'] for row in rows))
         for alias in ('radio', '收音机', 'turning_on_radio', 0):
             config = resolve_registered(alias, 'ood')
             self.assertEqual(config['instance_id'], 301)
@@ -45,6 +48,46 @@ class RegistryTests(unittest.TestCase):
         self.assertNotIn('/home/', json.dumps(rows))
         rows[0]['variants'].clear()
         self.assertEqual(len(registered_tasks()[0]['variants']), 2)
+
+    def test_every_official_instance_resolves_without_new_ood(self):
+        total = 0
+        rows = registered_tasks()
+        self.assertEqual(len({row['scene_model'] for row in rows}), 7)
+        for row in rows:
+            for split, instances in row['instances'].items():
+                self.assertEqual(len(instances), 300 if split == 'train' else 20)
+                for number in instances:
+                    config = resolve_registered(row['task_name'], 'id', split=split, instance_id=number)
+                    self.assertEqual(config['ood'], 'none')
+                    self.assertEqual(config['initial_yaw_offset_deg'], 0)
+                    self.assertEqual(config['instance_id'], number)
+                    self.assertEqual(config['mode'], split)
+                    total += 1
+                for invalid in (min(instances)-1, max(instances)+1, True, 301.0):
+                    with self.assertRaises(ValueError):
+                        resolve_registered(row['task_name'], 'original', split=split, instance_id=invalid)
+            if row['task_index'] != 0:
+                with self.assertRaises(ValueError):
+                    resolve_registered(row['task_index'], 'ood')
+        self.assertEqual(total, 32000)
+        self.assertEqual(resolve_registered(0, 'original', split='train')['instance_id'], 0)
+        self.assertEqual(resolve_registered(50, 'original', split='train')['instance_id'], 1)
+
+    def test_split_identity_and_layout_overrides_are_rejected(self):
+        config = resolve_registered(61, 'original', split='train', instance_id=1)
+        self.assertEqual(registered_scene_identity(config)['split'], 'train')
+        for key, value in [('mode', 'public_test'), ('split', 'public_test'), ('scene_model', 'other'),
+                           ('activity_definition_id', 1), ('partial_scene_load', False), ('target_key', 'fake'),
+                           ('task_index', 0), ('initial_offset_x', 2.0)]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                registered_scene_identity({**config, key: value})
+        for split in ('hidden_test', 'val', '../train'):
+            with self.assertRaises(ValueError):
+                resolve_registered(0, 'original', split=split)
+        with self.assertRaises(ValueError):
+            resolve_registered('radio', 'ood', split='train', instance_id=1)
+        with self.assertRaises(ValueError):
+            resolve_registered('radio', 'ood', split='public_test', instance_id=302)
 
     def fixture(self, directory):
         config = resolve_registered('radio', 'ood')

@@ -46,9 +46,11 @@ def positive_int(value):
 
 
 def parser():
-    p = argparse.ArgumentParser(description='独立收音机仿真：初始化，或执行外部 N×23 动作文件。', allow_abbrev=False)
+    p = argparse.ArgumentParser(description='独立 BEHAVIOR 仿真：初始化官方 ID 场景，或执行外部 N×23 动作文件。', allow_abbrev=False)
     p.add_argument('task', nargs='?')
-    p.add_argument('variant', nargs='?', choices=['original', 'ood'], default='ood')
+    p.add_argument('variant', nargs='?', choices=['original', 'id', 'ood'], default='original')
+    p.add_argument('--instance-id', type=int, help='官方实例编号，必须属于任务与 split 的官方列表')
+    p.add_argument('--split', choices=['train', 'public_test'], help='官方数据划分，省略时使用注册任务的默认划分')
     p.add_argument('--list', action='store_true')
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--output', type=Path)
@@ -67,9 +69,26 @@ def parser():
     return p
 
 
+def scene_output_name(scene):
+    """Include the complete selected instance identity in generated paths."""
+    return f"{scene['task_name']}_{scene['variant']}_{scene.get('split') or 'registered'}_instance{scene['instance_id']}"
+
+
 def print_catalog():
-    for task in registered_tasks():
-        print(f"{task['task_index']}  {task['task_name']}  {', '.join(task['variants'])}")
+    tasks = registered_tasks()
+    split_counts = {
+        split: sum(len(task['instances'][split]) for task in tasks)
+        for split in ('train', 'public_test')
+    }
+    ood_count = sum('ood' in task['variants'] for task in tasks)
+    print(f"官方任务: {len(tasks)} | ID 任务: {sum('original' in task['variants'] for task in tasks)} | "
+          f"ID 实例: {sum(split_counts.values())} "
+          f"(train {split_counts['train']}, public_test {split_counts['public_test']}) | "
+          f"房屋布局: {len({task['scene_model'] for task in tasks})} | 已注册 OOD: {ood_count}")
+    for task in tasks:
+        counts = ', '.join(f"{split}={len(ids)}" for split, ids in task['instances'].items())
+        print(f"{task['task_index']:>2}  {task['task_name']}  {task['scene_model']}  "
+              f"{counts}  variants={','.join(task['variants'])}")
 
 
 def validate_job(job):
@@ -89,6 +108,8 @@ def validate_job(job):
         raise ValueError('Visibility auditing requires initialize-only mode')
     if job['initial_visibility_audit'] and job['export_handoff']:
         raise ValueError('Visibility auditing is terminal and cannot export a handoff')
+    if job['initial_visibility_audit'] and job['scene'].get('target_key') is None:
+        raise ValueError('Visibility auditing requires a separately registered target; general ID scenes have none')
     actions = None
     if job['actions']:
         actions, digest = load_actions(job['actions'])
@@ -102,8 +123,10 @@ def execute_job(output):
     output = Path(output)
     job = json.loads((output / 'run_config.json').read_text())
     actions = validate_job(job)
-    from .environment import RadioEnvironment
-    env = RadioEnvironment(output / 'sim', variant=job['scene']['variant'],
+    from .environment import BehaviorEnvironment
+    env = BehaviorEnvironment(output / 'sim', task=job['scene']['task_name'],
+                           variant=job['scene']['variant'], instance_id=job['scene']['instance_id'],
+                           split=job['scene'].get('split'),
                            max_steps=job['max_steps'], render_profile=job['render_profile'],
                            headless=True, write_video=True,
                            initial_visibility_audit=job['initial_visibility_audit'])
@@ -202,7 +225,8 @@ def main(argv=None):
     p = parser()
     args = p.parse_args(argv)
     if args._worker:
-        if args.task or args.list or args.dry_run or args.actions:
+        if (args.task or args.list or args.dry_run or args.actions
+                or args.instance_id is not None or args.split is not None):
             p.error('内部 worker 参数不能混用公共入口选项')
         try:
             verify_inherited_lease(args._lease_fd)
@@ -223,7 +247,8 @@ def main(argv=None):
     if not args.task:
         p.error('请指定已注册任务，如 ./simulate radio ood')
     try:
-        scene = resolve_registered(args.task, args.variant)
+        scene = resolve_registered(args.task, 'original' if args.variant == 'id' else args.variant,
+                                   instance_id=args.instance_id, split=args.split)
         if args.actions and args.initialize_only:
             raise ValueError('--actions 与 --initialize-only 不能同时使用')
         if args.actions and args.initial_visibility_audit:
@@ -233,7 +258,7 @@ def main(argv=None):
         if max_steps < 1 or (actions is not None and len(actions) > max_steps):
             raise ValueError('--max-steps 必须为正且不少于外部动作数')
         suffix = time.strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:8]
-        output = (args.output or output_root() / 'radio' / f'{args.variant}_{suffix}').expanduser().resolve()
+        output = (args.output or output_root() / scene['task_name'] / f'{scene_output_name(scene)}_{suffix}').expanduser().resolve()
         if output.exists():
             raise ValueError(f'输出目录已存在，拒绝覆盖或重放：{output}')
         job = {'scene': scene, 'max_steps': max_steps, 'render_profile': args.render_profile,
@@ -252,8 +277,11 @@ def main(argv=None):
                           'gpu_memory_free_mib': memory, 'gpu_processes': processes}, ensure_ascii=False, indent=2))
         return 0
     if needs_privilege():
-        normalized = [args.task, args.variant, '--output', str(output), '--max-steps', str(max_steps),
+        normalized = [scene['task_name'], scene['variant'], '--instance-id', str(scene['instance_id']),
+                      '--output', str(output), '--max-steps', str(max_steps),
                       '--render-profile', args.render_profile, '--capture-every', str(args.capture_every)]
+        if scene.get('split') is not None:
+            normalized += ['--split', scene['split']]
         if args.actions:
             normalized += ['--actions', str(args.actions.expanduser().resolve())]
         for key in ('initialize_only', 'initial_visibility_audit', 'export_handoff'):

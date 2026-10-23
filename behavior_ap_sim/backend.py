@@ -88,7 +88,7 @@ class _VideoWriter:
 
 
 class SimulationBackend:
-    """Own a radio scene, apply 23-D actions, and persist simulation evidence.
+    """Own an official registered scene, apply 23-D actions, and persist evidence.
 
     Controllers live outside this package. The evaluator's LocalPolicy is an
     initialization placeholder only; this backend never calls its forward().
@@ -98,8 +98,6 @@ class SimulationBackend:
         self.config = dict(config)
         self.output_dir = Path(config["output_dir"]).expanduser().resolve()
         self.task_name = str(config.get("task_name", "turning_on_radio"))
-        if self.task_name != "turning_on_radio":
-            raise ValueError("Only the validated turning_on_radio task is registered")
         self.instance_id = int(config.get("instance_id", 301))
         self.max_steps = int(config.get("max_steps", 2000))
         if self.max_steps < 1:
@@ -173,9 +171,10 @@ class SimulationBackend:
         # public environment registry by constructing this class directly.
         # This runs before creating output files or importing the simulator.
         from .registry import registered_scene_identity
-        registered_scene_identity(self.config)
-        if self.config.get("mode", "public_test") != "public_test":
-            raise ValueError("Only the registered public_test evaluation mode is supported")
+        identity = registered_scene_identity(self.config)
+        registered_mode = identity["mode"]
+        if self.config.get("mode") != registered_mode:
+            raise ValueError("Evaluation mode does not match the registered scene split")
         package_robot_config = (Path(__file__).resolve().parent / "configs" / "r1pro.yaml").resolve()
         robot_path = Path(self.config.get("robot_config", package_robot_config)).expanduser().resolve()
         if robot_path != package_robot_config:
@@ -210,14 +209,15 @@ class SimulationBackend:
         seed_everything(int(self.config.get("seed", 0)))
         backend = self
 
-        class RadioRGBWrapper(DefaultWrapper):
+        class BehaviorRGBWrapper(DefaultWrapper):
             @classmethod
             def camera_spec(cls):
                 return {"modalities": ["rgb"], "resolution": {
                     "head": (448, 448), "left_wrist": (224, 224), "right_wrist": (224, 224)}}
 
         # Hydra resolves this named module attribute when the evaluator starts.
-        globals()["RadioRGBWrapper"] = RadioRGBWrapper
+        globals()["BehaviorRGBWrapper"] = BehaviorRGBWrapper
+        globals()["RadioRGBWrapper"] = BehaviorRGBWrapper  # Existing Hydra references remain valid.
 
         class SetupEvaluator(BatchedEvaluator):
             def _preprocess_obs(inner, obs, state):
@@ -250,17 +250,18 @@ class SimulationBackend:
 
         model = {"_target_": "omnigibson.eval.policies.LocalPolicy", "action_dim": None}
         cfg = OmegaConf.create({
-            "env_wrapper": {"_target_": "behavior_ap_sim.backend.RadioRGBWrapper"},
+            "env_wrapper": {"_target_": "behavior_ap_sim.backend.BehaviorRGBWrapper"},
             "policy_name": "local", "model": model,
-            "headless": gm.HEADLESS, "partial_scene_load": True,
+            "headless": gm.HEADLESS, "partial_scene_load": identity["partial_scene_load"],
             "max_steps": max(0, self.max_steps - 1), "write_video": False,
-            "mode": self.config.get("mode", "public_test"),
+            "mode": registered_mode,
             "seed": int(self.config.get("seed", 0)), "num_envs": 1,
             "task": {"name": self.task_name}, "robot": OmegaConf.load(str(robot_path)),
         })
         self.evaluator = SetupEvaluator(cfg)
         self.evaluator.load_batch({0: self.instance_id}, write_video=False)
         self.state = self.evaluator.instance_eval_states[0]
+        self._validate_loaded_scene(identity)
         self.robot = self.state.env_accessor.robot
         if self.robot.action_dim != 23:
             raise RuntimeError(f"Expected the R1Pro 23-D action interface, got {self.robot.action_dim}")
@@ -289,6 +290,31 @@ class SimulationBackend:
         observation = self.observe()
         self._ready = True
         return observation
+
+    def _validate_loaded_scene(self, identity):
+        """Reject external evaluator metadata drift before enabling task actions."""
+        task = self.evaluator.env.task
+        expected = {
+            "scene_model": identity["scene_model"],
+            "activity_name": identity["task_name"],
+            "activity_definition_id": identity["activity_definition_id"],
+            "instance_id": identity["instance_id"],
+        }
+        actual = {
+            "scene_model": getattr(self.state.env_accessor.scene, "scene_model", None),
+            "activity_name": getattr(task, "activity_name", None),
+            "activity_definition_id": getattr(task, "activity_definition_id", None),
+            "instance_id": getattr(self.state, "instance_id", None),
+        }
+        mismatches = [key for key in expected
+                      if actual[key] != expected[key] or type(actual[key]) is not type(expected[key])]
+        _write_json(self.output_dir / "scene_identity_validation.json", {
+            "verified": not mismatches, "expected": expected, "actual": actual,
+            "mismatches": mismatches, "split": identity["split"], "mode": identity["mode"],
+            "task_steps": self.steps,
+        })
+        if mismatches:
+            raise ValueError("Loaded official scene identity differs from registered scene: " + ", ".join(mismatches))
 
     def _setup_fixture(self, state):
         """The only method that may move a task object; called before episode reset."""
@@ -607,7 +633,8 @@ class SimulationBackend:
         if self._third_eye is None:
             # This is an audit-only camera. Its privileged fixture reference is
             # never returned as a robot observation to an external controller.
-            target_obj = self.state.env_accessor.object_scope.get(self.config.get("target_key", "radio_receiver.n.01_1"))
+            target_key = self.config.get("target_key")
+            target_obj = self.state.env_accessor.object_scope.get(target_key) if target_key is not None else None
             reference = self._array(target_obj.get_position_orientation()[0]) if target_obj is not None else center.copy()
             direction = center - reference
             direction[2] = 0
@@ -697,6 +724,9 @@ class SimulationBackend:
         self._timed("video_close_drain", time.perf_counter() - drain_started)
         result = {
             "task": self.task_name, "instance_id": self.instance_id, "steps": self.steps,
+            "variant": self.config.get("variant"), "split": self.config.get("split"),
+            "mode": self.config.get("mode"), "scene_model": self.config.get("scene_model"),
+            "partial_scene_load": self.config.get("partial_scene_load"),
             "max_steps": self.max_steps, "success": self.success, "done": self.done,
             "phase": self.phase, "termination_reason": self.termination_reason,
             "terminated": self.terminated, "truncated": self.truncated,

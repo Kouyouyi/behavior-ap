@@ -1,11 +1,14 @@
 {
-  "schema_version": 1,
-  "scope": "Only the tuned radio task is registered. Historical configurations do not confer registration.",
+  "schema_version": 2,
+  "scope": "All installed official challenge tasks have original ID variants. Only explicitly approved tuned OOD variants are registered.",
   "tasks": [
     {
       "task_index": 0,
       "task_name": "turning_on_radio",
-      "aliases": ["radio", "收音机"],
+      "aliases": [
+        "radio",
+        "收音机"
+      ],
       "instance_id": 301,
       "target_key": "radio_receiver.n.01_1",
       "official_success": "Official BDDL turning_on_radio success; seeing or approaching the receiver is not task completion.",
@@ -38,5 +41,6 @@
         }
       }
     }
-  ]
+  ],
+  "official_catalog": "official_tasks.json"
 }

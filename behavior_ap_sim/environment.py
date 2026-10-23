@@ -1,4 +1,4 @@
-"""Standalone registered radio simulation, observations, actions, and private audits."""
+"""Standalone official task simulation, observations, actions, and private audits."""
 import time
 from pathlib import Path
 
@@ -10,26 +10,30 @@ from .scoring import ROLES, RawMeshTargetScorer, array
 from .state import fingerprint
 
 
-class RadioEnvironment:
-    def __init__(self, output, *, variant='ood', max_steps=800, render_profile='baseline',
-                 headless=True, write_video=True, initial_visibility_audit=False):
+class BehaviorEnvironment:
+    def __init__(self, output, *, task='radio', variant='original', instance_id=None, split=None,
+                 max_steps=800, render_profile='baseline', headless=True, write_video=True,
+                 initial_visibility_audit=False):
         if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
             raise ValueError('max_steps must be a positive integer')
         if render_profile not in ('baseline', 'async_video', 'fast'):
             raise ValueError('Unknown render profile')
         if any(not isinstance(value, bool) for value in (headless, write_video, initial_visibility_audit)):
             raise ValueError('headless, write_video and initial_visibility_audit must be booleans')
-        registered = resolve_registered('radio', variant)
-        self.variant = variant
+        registered = resolve_registered(task, variant, instance_id=instance_id, split=split)
+        if initial_visibility_audit and registered.get('target_key') is None:
+            raise ValueError('Visibility audit requires a registered single target; this original task has none')
+        self.variant = registered['variant']
         self.initial_visibility_audit = initial_visibility_audit
         self._started = self._start_attempted = self._terminal_audit_started = False
         self._handoff_restore_attempted = self._state_restore_failed = False
         self._closed = False
         self.scorer = None
+        self.target = None
         from .backend import SimulationBackend
         self.backend = SimulationBackend({
             **registered, 'output_dir': str(Path(output).resolve()), 'max_steps': max_steps,
-            'mode': 'public_test', 'run_mode': 'external', 'head_mode': 'physical_trunk',
+            'run_mode': 'external', 'head_mode': 'physical_trunk',
             'headless': headless, 'write_video': write_video, 'render_profile': render_profile,
             'robot_config': str(Path(__file__).resolve().parent / 'configs/r1pro.yaml')})
 
@@ -78,7 +82,8 @@ class RadioEnvironment:
             'action_indices': actual, 'sim_step_dt': dt, 'robot_config': self.backend.config['robot_config'],
             'observation_source': 'official robot_r1::proprio and native robot sensors',
             'joint_axis_physical_probe_passed': False})
-        self.target = self.backend.state.env_accessor.object_scope[self.backend.config['target_key']]
+        target_key = self.backend.config.get('target_key')
+        self.target = self.backend.state.env_accessor.object_scope[target_key] if target_key is not None else None
         self._started = True
         if self.initial_visibility_audit:
             # This OG version can crash when stepping after attaching these graphs.
@@ -124,6 +129,8 @@ class RadioEnvironment:
         self.backend._refresh_sensor_observations()
 
     def make_scorer(self):
+        if self.target is None:
+            raise ValueError('Visibility audit requires a registered single target; this original task has none')
         return RawMeshTargetScorer(self.backend.robot, self.target, self.backend.evaluator.robot_camera_names)
 
     def step(self, action):
@@ -157,7 +164,8 @@ class RadioEnvironment:
         save_json(directory / 'observation.json', observation)
         private = self.scorer() if self.scorer else {
             'target_visible': None, 'visibility_measurement': 'not instrumented during physics rollout',
-            'target_position': array(self.target.get_position_orientation()[0]).tolist(),
+            'target_position': (array(self.target.get_position_orientation()[0]).tolist()
+                                if self.target is not None else None),
             'base_position': array(self.backend.robot.get_position_orientation()[0]).tolist()}
         private.update(step=self.steps, official_task_success=bool(self.success))
         save_json(directory / 'scorer_private.json', private)
@@ -165,6 +173,8 @@ class RadioEnvironment:
 
     def verify_approach(self, directory):
         self._require_ready(allow_audit=False)
+        if self.target is None:
+            raise ValueError('Approach audit requires a registered single target; this original task has none')
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=False)
         self._terminal_audit_started = True
@@ -197,3 +207,13 @@ class RadioEnvironment:
 
     def shutdown(self):
         return self.backend.shutdown_runtime()
+
+
+class RadioEnvironment(BehaviorEnvironment):
+    """Compatibility interface for the already registered radio original/OOD scenes."""
+
+    def __init__(self, output, *, variant='ood', max_steps=800, render_profile='baseline',
+                 headless=True, write_video=True, initial_visibility_audit=False):
+        super().__init__(output, task='radio', variant=variant, max_steps=max_steps,
+                         render_profile=render_profile, headless=headless, write_video=write_video,
+                         initial_visibility_audit=initial_visibility_audit)

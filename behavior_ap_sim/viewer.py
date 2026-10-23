@@ -1,4 +1,4 @@
-"""Native mouse-interactive Isaac inspector for registered radio scenes."""
+"""Native mouse-interactive Isaac inspector for registered BEHAVIOR scenes."""
 import argparse
 import json
 import math
@@ -10,10 +10,22 @@ import sys
 import time
 import uuid
 
-from .registry import registered_tasks, resolve_registered, registered_scene_identity
+from .registry import resolve_registered, registered_scene_identity
+from .cli import print_catalog, scene_output_name
 from .resources import (GpuBusy, ROOT, check_exit, gpu_lease, gpu_lock_path, gpu_status,
                         needs_privilege, output_root, privilege_command, record_error,
                         runtime_env, runtime_python, save_json, verify_inherited_lease, wait_child)
+
+
+
+def focus_reference(backend, config, kind):
+    """A general scene view must not depend on any radio-specific object."""
+    if kind == 'target' and config.get('target_key'):
+        target = backend.state.env_accessor.object_scope[config['target_key']]
+        return backend._array(target.get_position_orientation()[0]).copy(), target
+    center = backend._array(backend.robot.get_position_orientation()[0]).copy()
+    center[2] += .8
+    return center, None
 
 
 def gui(output, seconds=0):
@@ -22,11 +34,12 @@ def gui(output, seconds=0):
     registered_scene_identity(config)
     if not math.isfinite(seconds) or seconds < 0:
         raise ValueError('GUI duration must be finite and nonnegative')
-    from .environment import RadioEnvironment
+    from .environment import BehaviorEnvironment
     from omnigibson.macros import gm
     gm.GUI_VIEWPORT_ONLY = False
     gm.REMOTE_STREAMING = None
-    env = RadioEnvironment(output / 'sim', variant=config['variant'], max_steps=10000,
+    env = BehaviorEnvironment(output / 'sim', task=config['task_name'], variant=config['variant'],
+                           instance_id=config['instance_id'], split=config.get('split'), max_steps=10000,
                            headless=False, write_video=True, render_profile='baseline')
     primary_error = None
     try:
@@ -45,7 +58,7 @@ def gui(output, seconds=0):
         if viewport is None:
             raise RuntimeError('Isaac did not create a native viewport')
         viewport.camera_path = og.sim.viewer_camera.prim_path
-        og.app.set_setting('/app/window/title', f"BEHAVIOR AP | radio | {config['variant'].upper()}")
+        og.app.set_setting('/app/window/title', f"BEHAVIOR AP | {config['task_name']} | {config['variant'].upper()} | instance {config['instance_id']}")
         for name in ('Viewport', 'Stage', 'Property', 'Main ToolBar'):
             window = ui.Workspace.get_window(name)
             if window is not None:
@@ -59,10 +72,9 @@ def gui(output, seconds=0):
                 position, orientation = b.robot.sensors[name].get_position_orientation()
                 camera.set_position_orientation(position=position, orientation=orientation)
                 return
-            target = b.state.env_accessor.object_scope[config['target_key']]
-            ref = b._array(target.get_position_orientation()[0]).copy()
+            ref, target = focus_reference(b, config, kind)
             robot = b._array(b.robot.get_position_orientation()[0])
-            direction = robot - ref
+            direction = robot - ref if target is not None else b.np.array([1., -1., 0.])
             direction[2] = 0
             length = b.np.linalg.norm(direction)
             direction = direction / length if length > .05 else b.np.array([1., 0., 0.])
@@ -75,19 +87,21 @@ def gui(output, seconds=0):
             up = b.np.cross(right, forward)
             quat = b.Rotation.from_matrix(b.np.column_stack([right, up, -forward])).as_quat()
             camera.set_position_orientation(position=eye.tolist(), orientation=quat.tolist())
-            omni.usd.get_context().get_selection().set_selected_prim_paths([target.prim_path], False)
+            if target is not None:
+                omni.usd.get_context().get_selection().set_selected_prim_paths([target.prim_path], False)
 
-        panel = ui.Window('Radio Scene Inspector', width=440, height=220)
+        panel = ui.Window('BEHAVIOR Scene Inspector', width=440, height=220)
         with panel.frame:
             with ui.VStack(spacing=6):
                 ui.Label(config['task_name'], word_wrap=True)
-                ui.Label(f"{config['variant'].upper()} | instance {config['instance_id']} | seed {config['seed']}")
+                ui.Label(f"{config['variant'].upper()} | {config.get('split', 'registered')} | instance {config['instance_id']} | seed {config['seed']}")
                 ui.Label('Right-drag: look; middle-drag: pan; wheel: zoom.\nSelect object: W move, E rotate, F frame.\nStarts paused. Edits remain in the session layer.', word_wrap=True)
                 with ui.HStack(spacing=8):
-                    ui.Button('Focus target', clicked_fn=lambda: request.update(focus='target'))
+                    ui.Button('Focus target' if config.get('target_key') else 'Focus scene',
+                              clicked_fn=lambda: request.update(focus='target' if config.get('target_key') else 'scene'))
                     ui.Button('Robot viewpoint', clicked_fn=lambda: request.update(focus='robot'))
                     ui.Button('Close', clicked_fn=lambda: request.update(close=True))
-        focus('target')
+        focus('target' if config.get('target_key') else 'scene')
         for _ in range(8):
             og.app.update()
         save_json(output / 'viewer_ready.json', {
@@ -166,7 +180,9 @@ def launch(args, config, output):
 def parser():
     p = argparse.ArgumentParser(description='打开原生可交互 Isaac 窗口，默认暂停物理。', allow_abbrev=False)
     p.add_argument('task', nargs='?')
-    p.add_argument('variant', nargs='?', choices=['original', 'ood'], default='ood')
+    p.add_argument('variant', nargs='?', choices=['original', 'id', 'ood'], default='original')
+    p.add_argument('--instance-id', type=int, help='官方实例编号，必须属于任务与 split 的官方列表')
+    p.add_argument('--split', choices=['train', 'public_test'], help='官方数据划分，省略时使用注册任务的默认划分')
     p.add_argument('--list', action='store_true')
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--output', type=Path)
@@ -184,22 +200,22 @@ def main(argv=None):
     if not math.isfinite(args.smoke_seconds) or args.smoke_seconds < 0:
         p.error('--smoke-seconds 必须是非负有限数')
     if args._gui_child:
-        if args.task or args.list or args.dry_run:
+        if args.task or args.list or args.dry_run or args.instance_id is not None or args.split is not None:
             p.error('内部 GUI 参数不能混用公共入口选项')
         verify_inherited_lease(args._lease_fd)
         return gui(args._gui_child, args.smoke_seconds)
     if args._lease_fd is not None:
         p.error('--_lease-fd 仅允许内部 GUI 子进程使用')
     if args.list:
-        for row in registered_tasks():
-            print(f"{row['task_index']}  {row['task_name']}  {', '.join(row['variants'])}")
+        print_catalog()
         return 0
     if not args.task:
         p.error('请指定已注册任务，如 ./scene radio original')
     try:
-        config = resolve_registered(args.task, args.variant)
+        config = resolve_registered(args.task, 'original' if args.variant == 'id' else args.variant,
+                                    instance_id=args.instance_id, split=args.split)
         suffix = time.strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:8]
-        output = (args.output or output_root() / 'viewer' / f'{args.variant}_{suffix}').expanduser().resolve()
+        output = (args.output or output_root() / 'viewer' / f'{scene_output_name(config)}_{suffix}').expanduser().resolve()
         if output.exists():
             raise ValueError(f'输出目录已存在：{output}')
     except ValueError as exc:
@@ -212,7 +228,10 @@ def main(argv=None):
                           'gpu_processes': processes}, ensure_ascii=False, indent=2))
         return 0
     if needs_privilege():
-        normalized = [args.task, args.variant, '--output', str(output), '--smoke-seconds', str(args.smoke_seconds)]
+        normalized = [config['task_name'], config['variant'], '--instance-id', str(config['instance_id']),
+                      '--output', str(output), '--smoke-seconds', str(args.smoke_seconds)]
+        if config.get('split') is not None:
+            normalized += ['--split', config['split']]
         if not args.wait:
             normalized.append('--no-wait')
         return subprocess.call(privilege_command('behavior_ap_sim.viewer', normalized, runtime_env(headless=False)), cwd=ROOT)

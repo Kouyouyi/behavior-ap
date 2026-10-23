@@ -14,7 +14,8 @@ def fingerprint(environment):
     backend = environment.backend
     target = environment.target
     return {'task_name': backend.task_name, 'instance_id': backend.instance_id,
-            'objects': {target.name: [array(value).tolist() for value in target.get_position_orientation()]},
+            'objects': ({target.name: [array(value).tolist() for value in target.get_position_orientation()]}
+                        if target is not None else {}),
             'robot_pose': [array(value).tolist() for value in backend.robot.get_position_orientation()]}
 
 
@@ -111,13 +112,16 @@ def restore_handoff(environment, directory):
     if metadata.get('objects') != [obj.name for obj in backend.state.env_accessor.scene.objects]:
         raise ValueError('Handoff scene object order differs')
     expected_fingerprint = metadata.get('fingerprint')
+    expected_targets = {environment.target.name} if environment.target is not None else set()
     if (not isinstance(expected_fingerprint, dict)
             or expected_fingerprint.get('task_name') != backend.task_name
             or expected_fingerprint.get('instance_id') != backend.instance_id
-            or set(expected_fingerprint.get('objects', {})) != {environment.target.name}):
+            or not isinstance(expected_fingerprint.get('objects'), dict)
+            or set(expected_fingerprint['objects']) != expected_targets):
         raise ValueError('Handoff fingerprint identity is invalid')
     _valid_pose(expected_fingerprint['robot_pose'])
-    _valid_pose(expected_fingerprint['objects'][environment.target.name])
+    for target_name in expected_targets:
+        _valid_pose(expected_fingerprint['objects'][target_name])
     state = read_serialized_state(directory, metadata)
     environment._handoff_restore_attempted = True
     environment._state_restore_failed = True

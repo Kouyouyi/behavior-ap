@@ -1,0 +1,105 @@
+{
+  "valid": true,
+  "validation_level": "all_registered_json_parsed_with_selected_real_smoke_tests",
+  "simulator_started": true,
+  "scene_execution_verified": false,
+  "task_count": 100,
+  "instance_count": 32000,
+  "json_payloads_checked": 32399,
+  "metadata_errors": [],
+  "missing_required_files": [],
+  "missing_optional_files": [
+    "2026-challenge-task-instances/scenes/house_single_floor/json/house_single_floor_task_bringing_water_0_0_template-partial_rooms.json"
+  ],
+  "invalid_files": [],
+  "unexpected_instance_files": [],
+  "counts": {
+    "task_count": 100,
+    "scene_model_count": 7,
+    "tasks_by_scene_model": {
+      "Rs_int": 6,
+      "hotel_suite_large": 5,
+      "house_double_floor_lower": 32,
+      "house_double_floor_upper": 10,
+      "house_single_floor": 34,
+      "office_cubicles_right": 5,
+      "restaurant_diner": 8
+    },
+    "instances_by_split": {
+      "train": 30000,
+      "public_test": 2000
+    },
+    "total_instances": 32000,
+    "full_templates": 200,
+    "partial_room_templates": 199
+  },
+  "package_version": "0.2.0",
+  "lightweight_tests_passed": 86,
+  "simulator_smoke_tests": [
+    {
+      "task_name": "freeze_fruit",
+      "task_index": 50,
+      "split": "train",
+      "instance_id": 1,
+      "scene_model": "house_single_floor",
+      "kind": "headless_initialization_and_state_export",
+      "passed": true,
+      "task_steps": 0,
+      "model_inference": false,
+      "official_task_success": false,
+      "termination_reason": "initialize_only",
+      "loaded_identity_verified": true,
+      "errors": [],
+      "evidence_directory": "outputs/id_extension/freeze_fruit_train1_v1",
+      "full_state_exported": true,
+      "state_restore_exercised": false,
+      "observation_state_dim": 61,
+      "rgb_shapes": {
+        "head": [
+          448,
+          448
+        ],
+        "left_wrist": [
+          224,
+          224
+        ],
+        "right_wrist": [
+          224,
+          224
+        ]
+      }
+    },
+    {
+      "task_name": "installing_a_fax_machine",
+      "task_index": 89,
+      "split": "public_test",
+      "instance_id": 301,
+      "scene_model": "office_cubicles_right",
+      "kind": "native_gui_initialization",
+      "passed": true,
+      "task_steps": 0,
+      "model_inference": false,
+      "official_task_success": false,
+      "termination_reason": "viewer_closed",
+      "loaded_identity_verified": true,
+      "errors": [],
+      "evidence_directory": "outputs/id_extension/fax_public301_gui_v1",
+      "native_gui": true,
+      "paused_initially": true,
+      "session_layer_editing_enabled": true,
+      "manual_mouse_drag_verified": false,
+      "automatic_close_after_ready_seconds": 3
+    }
+  ],
+  "all_registered_scenes_runtime_verified": false,
+  "package": {
+    "wheel": "behavior_ap-0.2.0-py3-none-any.whl",
+    "sha256": "1d37576bfb2439282b7f10316974fccaa1b35091cfe79ec50e651d6530b8d32f",
+    "isolated": "/media/cody/软件/behavior_ap/outputs/id_extension/isolated"
+  },
+  "limitations": [
+    "Only two non-radio task instances were started in the simulator for this release; not all 100 tasks were physically tested.",
+    "No Planner or VLA was called and no task-success or policy performance claim is made.",
+    "Only previously approved radio OOD remains registered."
+  ]
+}

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "behavior-ap"
-version = "0.1.0"
-description = "Standalone BEHAVIOR radio simulation environment with registered search OOD scenes"
+version = "0.2.0"
+description = "Standalone BEHAVIOR official ID task environments with explicitly registered OOD scenes"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [

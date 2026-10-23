@@ -1,8 +1,10 @@
 # 场景注册来源
 
+0.2版增加官方100任务的原始ID场景入口，按实际文件注册30000训练实例与2000公开测试实例。task.jsonl、B100_task_misc.csv、available_tasks.yaml三方一致性和完整路径列表由 `scripts/catalog_official_assets.py` 生成/校验，来源SHA256保存在包内 `official_tasks.json`。原场景从官方完整基础模板与对应split的TRO状态加载；不加入旧实验的任意OOD。以下仅是已获确认的收音机OOD历史来源。
+
 本独立项目于2026-10-23从已调试的收音机环境抽取。旧项目的Planner、模型客户端、批测脚本、模型权重、生成视频与源资产均没有纳入本仓库。运行时仅需本包和单独安装的官方仿真依赖。
 
-注册范围是官方 `turning_on_radio`（task0）、public_test实例301、种子20261020。原场景不加摆放修改；OOD场景使用 `radio_on_tv_cabinet_facing_room`，将收音机放在电视矮柜上、开关朝房间，并将机器人起始朝向旋转180度。其他任务和柜内遮挡未注册。
+收音机OOD注册范围是官方 `turning_on_radio`（task0）、public_test实例301、种子20261020。原场景不加摆放修改；OOD场景使用 `radio_on_tv_cabinet_facing_room`，将收音机放在电视矮柜上、开关朝房间，并将机器人起始朝向旋转180度。其他任务的OOD和柜内遮挡未注册。
 
 OOD来源记录为 `champion_start_comparison_20261020_v3/final_comparison.json`。历史对照中，Harness搜索480步后，冠军权重继续5118步，官方BDDL成功，总5598步；直接冠军组10000步未成功。它支持此场景已有有效运行经验，只是一个场景和种子，不代表泛化成功率，也不是本独立包重新调用模型得到的结果。
 
