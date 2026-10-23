@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "scope": "Only the tuned radio task is registered. Historical configurations do not confer registration.",
+  "tasks": [
+    {
+      "task_index": 0,
+      "task_name": "turning_on_radio",
+      "aliases": ["radio", "收音机"],
+      "instance_id": 301,
+      "target_key": "radio_receiver.n.01_1",
+      "official_success": "Official BDDL turning_on_radio success; seeing or approaching the receiver is not task completion.",
+      "variants": {
+        "original": {
+          "ood": "none",
+          "seed": 20261020,
+          "initial_yaw_offset_deg": 0.0,
+          "initial_offset_x": 0.0,
+          "initial_offset_y": 0.0,
+          "scenario_spec": null,
+          "validation_scope": "Official original scene for the tuned radio task; no added OOD placement."
+        },
+        "ood": {
+          "ood": "radio_on_tv_cabinet_facing_room",
+          "seed": 20261020,
+          "initial_yaw_offset_deg": 180.0,
+          "initial_offset_x": 0.0,
+          "initial_offset_y": 0.0,
+          "scenario_spec": null,
+          "validation_scope": "Previously completed fresh-start harness plus champion trial with official BDDL success; one scene, one seed.",
+          "provenance": {
+            "document": "docs/PROVENANCE.md",
+            "source_evaluation": "champion_start_comparison_20261020_v3",
+            "historical_search_steps": 480,
+            "historical_completion_steps": 5118,
+            "historical_official_success": true,
+            "scope": "Historical fixture provenance; not a new result for this standalone package."
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "repo": "https://github.com/StanfordVL/BEHAVIOR-1K",
+  "commit": "a8247a8cc1633fe1ca0cc66aa07243d46c64f155",
+  "package": "OmniGibson 3.9.3",
+  "isaac": "5.1.0",
+  "assets_root_original": "/root/download/datasets/BEHAVIOR-1K",
+  "required_asset_directories": [
+    "2026-challenge-task-instances",
+    "behavior-1k-assets",
+    "omnigibson-robot-assets"
+  ],
+  "assets_included": false,
+  "license_key_included": false
+}

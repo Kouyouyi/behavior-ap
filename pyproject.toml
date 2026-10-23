@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "behavior-ap"
+version = "0.1.0"
+description = "Standalone BEHAVIOR radio simulation environment with registered search OOD scenes"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "numpy>=1.26,<2",
+  "scipy>=1.11,<2",
+  "omegaconf>=2.3,<3",
+  "av>=14,<17",
+]
+
+[project.scripts]
+behavior-scene = "behavior_ap_sim.viewer:main"
+behavior-sim = "behavior_ap_sim.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["behavior_ap_sim*"]
+
+[tool.setuptools.package-data]
+behavior_ap_sim = ["configs/*.json", "configs/*.yaml"]

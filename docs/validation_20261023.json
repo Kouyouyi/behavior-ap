@@ -1,0 +1,56 @@
+{
+  "task": "turning_on_radio",
+  "variant": "ood",
+  "task_steps": 480,
+  "ack_integrity_passed": true,
+  "official_task_success": false,
+  "model_inference": false,
+  "observations_compared": 61,
+  "max_abs_proprio_difference": 0.0,
+  "videos": {
+    "robot_cameras.mp4": {
+      "codec_name": "h264",
+      "width": 672,
+      "height": 448,
+      "pix_fmt": "yuv420p",
+      "r_frame_rate": "30/1",
+      "nb_read_frames": "480",
+      "full_decode_passed": true,
+      "sha256": "c3ae2ff90835a9a04f9504442c8002e1d27e3fe6ac698efae72c27489cc2d13a"
+    },
+    "third_person.mp4": {
+      "codec_name": "h264",
+      "width": 1280,
+      "height": 720,
+      "pix_fmt": "yuv420p",
+      "r_frame_rate": "30/1",
+      "nb_read_frames": "480",
+      "full_decode_passed": true,
+      "sha256": "a8ebfea117e1a01918eb720667d9a07e453463e4e70fc809a7e9d543e6ec4999"
+    }
+  },
+  "elapsed_wall_seconds": 170.89834880828857,
+  "date": "2026-10-23",
+  "lightweight_tests": 64,
+  "execution_origin": "isolated wheel package; working directory /tmp",
+  "wheel_sha256": "68224dd854d0773e86143f6d08612db2c572d9a79c415c4c019b075ae2e6d88a",
+  "original_initialization": {
+    "passed": true,
+    "task_steps": 0,
+    "handoff_exported": true
+  },
+  "notes": [
+    "Fixed external action fixture from a fresh initial scene; no model or planner was invoked.",
+    "Proprio comparison is 61 observations of 61 dimensions; not a claim of all-world or pixel equivalence.",
+    "Cross-process state restore was tested with mocks in this package; prior integrated runtime evidence is separate."
+  ],
+  "native_gui": {
+    "passed": true,
+    "variant": "original",
+    "paused_initially": true,
+    "manual_usd_editing_enabled": true,
+    "asset_edits_saved": false,
+    "smoke_seconds_after_ready": 3,
+    "manual_drag_tested": false
+  }
+}

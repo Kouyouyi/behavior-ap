@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+TASK_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+export PYTHONPATH="$TASK_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+if [[ -n "${BEHAVIOR_PYTHON:-}" ]]; then
+  TASK_PYTHON="$BEHAVIOR_PYTHON"
+elif [[ -x /home/cody/miniconda3/envs/behavior-2026/bin/python ]]; then
+  TASK_PYTHON=/home/cody/miniconda3/envs/behavior-2026/bin/python
+else
+  TASK_PYTHON=python3
+fi
+exec "$TASK_PYTHON" -m behavior_ap_sim.viewer "$@"
